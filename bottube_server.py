@@ -2103,6 +2103,9 @@ def init_db():
         "referred_by_code": "ALTER TABLE agents ADD COLUMN referred_by_code TEXT DEFAULT ''",
         "referred_at": "ALTER TABLE agents ADD COLUMN referred_at REAL DEFAULT 0",
         "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
+        "banner_url": "ALTER TABLE agents ADD COLUMN banner_url TEXT DEFAULT ''",
+        "accent_color": "ALTER TABLE agents ADD COLUMN accent_color TEXT DEFAULT ''",
+        "pinned_video_id": "ALTER TABLE agents ADD COLUMN pinned_video_id TEXT DEFAULT ''",
     }
     for col, sql in agent_migrations.items():
         if col not in existing_cols:
@@ -4096,7 +4099,7 @@ def agent_to_dict(row, include_private=False, *, badges=None):
     the requesting user is viewing their own profile.
     """
     SAFE_FIELDS = {
-        "id", "agent_name", "display_name", "bio", "avatar_url",
+        "id", "agent_name", "display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id",
         "is_human", "x_handle", "created_at",
     }
     PRIVATE_FIELDS = {
@@ -4353,6 +4356,21 @@ def render_mentions(text):
 app.jinja_env.filters["format_duration"] = format_duration
 app.jinja_env.filters["format_views"] = format_views
 app.jinja_env.filters["time_ago"] = time_ago
+
+def minimal_markdown(text):
+    if not text:
+        return ""
+    import html, re
+    t = html.escape(str(text))
+    t = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', r'<a href="\2" target="_blank" rel="nofollow">\1</a>', t)
+    t = re.sub(r'\*\*([^\*]+)\*\*', r'<strong>\1</strong>', t)
+    t = re.sub(r'\*([^\*]+)\*', r'<em>\1</em>', t)
+    t = re.sub(r'```([^`]+)```', r'<pre><code>\1</code></pre>', t, flags=re.DOTALL)
+    t = re.sub(r'`([^`]+)`', r'<code>\1</code>', t)
+    t = t.replace('\n', '<br>')
+    return Markup(t)
+
+app.jinja_env.filters["minimal_markdown"] = minimal_markdown
 app.jinja_env.filters["parse_tags"] = parse_tags
 app.jinja_env.filters["datetime_iso"] = datetime_iso
 app.jinja_env.filters["timestamp_date"] = timestamp_date
@@ -8325,7 +8343,7 @@ def platform_stats():
 def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
     data = request.get_json(silent=True) or {}
-    ALLOWED = {"display_name", "bio", "avatar_url"}
+    ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
     updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
     if not updates:
         return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
@@ -10713,9 +10731,24 @@ def channel(agent_name):
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
 
+    # Extract customization from agent
+    customization = {
+        "banner_url": agent.get("banner_url", ""),
+        "theme_accent_color": agent.get("accent_color", ""),
+        "theme_primary_color": "",
+        "theme_background_dark": 1
+    }
+    pinned_videos = []
+    if agent.get("pinned_video_id"):
+        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
+        if pinned:
+            pinned_videos = pinned
+
     return render_template(
         "channel.html",
         agent=agent,
+        customization=customization,
+        pinned_videos=pinned_videos,
         agent_badges=agent_badges,
         videos=videos,
         total_views=total_views,

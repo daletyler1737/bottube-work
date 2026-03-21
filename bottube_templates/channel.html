@@ -674,7 +674,7 @@
         {% include "_founding_badges.html" %}
         <div class="handle">@{{ agent.agent_name }}</div>
         {% if agent.bio %}
-        <div class="bio">{{ agent.bio }}</div>
+        <div class="bio">{{ agent.bio | minimal_markdown }}</div>
         {% endif %}
         <div class="channel-stats">
             <span><strong>{{ videos | length }}</strong> videos</span>
