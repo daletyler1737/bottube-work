@@ -2102,7 +2102,7 @@ def init_db():
         # Referrals (best-effort growth tracking)
         "referred_by_code": "ALTER TABLE agents ADD COLUMN referred_by_code TEXT DEFAULT ''",
         "referred_at": "ALTER TABLE agents ADD COLUMN referred_at REAL DEFAULT 0",
-                "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
+        "referral_first_upload_counted": "ALTER TABLE agents ADD COLUMN referral_first_upload_counted INTEGER DEFAULT 0",
         "banner_url": "ALTER TABLE agents ADD COLUMN banner_url TEXT DEFAULT ''",
         "accent_color": "ALTER TABLE agents ADD COLUMN accent_color TEXT DEFAULT ''",
         "pinned_video_id": "ALTER TABLE agents ADD COLUMN pinned_video_id TEXT DEFAULT ''",
@@ -4099,7 +4099,7 @@ def agent_to_dict(row, include_private=False, *, badges=None):
     the requesting user is viewing their own profile.
     """
     SAFE_FIELDS = {
-        "id", "agent_name", "display_name", "bio", "avatar_url",
+        "id", "agent_name", "display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id",
         "is_human", "x_handle", "created_at",
     }
     PRIVATE_FIELDS = {
@@ -4356,6 +4356,7 @@ def render_mentions(text):
 app.jinja_env.filters["format_duration"] = format_duration
 app.jinja_env.filters["format_views"] = format_views
 app.jinja_env.filters["time_ago"] = time_ago
+
 def minimal_markdown(text):
     if not text:
         return ""
@@ -4370,7 +4371,6 @@ def minimal_markdown(text):
     return Markup(t)
 
 app.jinja_env.filters["minimal_markdown"] = minimal_markdown
-
 app.jinja_env.filters["parse_tags"] = parse_tags
 app.jinja_env.filters["datetime_iso"] = datetime_iso
 app.jinja_env.filters["timestamp_date"] = timestamp_date
@@ -4629,19 +4629,6 @@ def reclaim_account_page():
         notice = _build_recovery_notice(get_db())
     except Exception:
         notice = _build_recovery_notice(None)
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "reclaim_account.html",
         recovery_notice=notice,
@@ -4723,20 +4710,7 @@ def signup():
                     "agent_name": row["agent_name"],
                     "display_name": row["display_name"] or row["agent_name"],
                 }
-        # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
-    return render_template(
+        return render_template(
             "login.html",
             signup=True,
             form_ts=time.time(),
@@ -4889,19 +4863,6 @@ def referral_redirect(code):
     if not ref:
         abort(404)
     signup_url = url_for("signup", ref=ref_code)
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "referral_landing.html",
         code=ref["code"],
@@ -7126,19 +7087,6 @@ def category_browse(cat_id):
             LIMIT 100""",
         (cat_id,),
     ).fetchall()
-
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
 
     return render_template(
         "category.html",
@@ -10244,19 +10192,6 @@ def index():
         ).fetchone()[0],
     }
 
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "index.html",
         trending=trending_rows,
@@ -10529,19 +10464,6 @@ def watch(video_id):
         interaction_commenters = []
         interaction_likers = []
         interaction_outgoing = []
-
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
 
     return render_template(
         "watch.html",
@@ -11155,19 +11077,6 @@ def dashboard_page():
     ).fetchall()
     db.commit()
 
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "dashboard.html",
         videos=videos,
@@ -11450,19 +11359,6 @@ def categories_page():
     ).fetchall()
     counts = {r["category"]: r["cnt"] for r in rows}
     total = sum(counts.values())
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "categories.html",
         categories=VIDEO_CATEGORIES,
@@ -11481,19 +11377,6 @@ def about_page():
            WHERE v.is_removed = 0 AND COALESCE(a.is_banned, 0) = 0"""
     ).fetchone()[0]
     total_agents = db.execute("SELECT COUNT(*) FROM agents WHERE COALESCE(is_banned, 0) = 0").fetchone()[0]
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
-
     return render_template(
         "about.html",
         total_videos=total_videos,
@@ -12025,19 +11908,6 @@ def giveaway_page():
     total_entrants = db.execute(
         "SELECT COUNT(*) FROM giveaway_entrants WHERE disqualified = 0"
     ).fetchone()[0]
-
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
 
     return render_template(
         "giveaway.html",
@@ -14949,19 +14819,6 @@ def tips_dashboard():
            WHERE COALESCE(t.status, 'confirmed') = 'confirmed'
            ORDER BY t.created_at DESC LIMIT 6""",
     ).fetchall()
-
-    # Extract customization from agent
-    customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
-        "theme_primary_color": "",
-        "theme_background_dark": 1
-    }
-    pinned_videos = []
-    if agent.get("pinned_video_id"):
-        pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
-        if pinned:
-            pinned_videos = pinned
 
     return render_template(
         "tips_dashboard.html",
