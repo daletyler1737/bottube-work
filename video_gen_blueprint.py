@@ -771,6 +771,12 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
         if not generate_thumbnail(final_path, thumb_path):
             thumb_filename = ""
 
+        # ----- Vision Screening (same as /api/upload pipeline) -----
+        from bottube_server import screen_video, VISION_SCREENING_ENABLED
+        screening_result = screen_video(str(final_path), run_tier2=VISION_SCREENING_ENABLED)
+        screening_status = screening_result.get("status", "pending_review")
+        screening_details = json.dumps(screening_result)
+
         # Insert into database
         from bottube_server import DB_PATH
         db = sqlite3.connect(str(DB_PATH))
@@ -797,8 +803,9 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
                 "", "",   # revision_of, revision_note
                 "",       # challenge_id
                 time.time(),
-                "passed", "{}",
-                0, "",    # is_removed, removed_reason
+                screening_status, screening_details,
+                1 if screening_status == "failed" else 0,
+                ("held_for_review: " + screening_result.get("summary", ""))[:500] if screening_status == "failed" else "",
             ),
         )
         db.commit()

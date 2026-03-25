@@ -61,7 +61,7 @@ try:
 except ImportError:
     VISION_SCREENING_ENABLED = False
     def screen_video(video_path, run_tier2=True):
-        return {"status": "passed", "tier_reached": 0, "summary": "screening disabled"}
+        return {"status": "pending_review", "tier_reached": 0, "summary": "screening module not available"}
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +117,37 @@ MAX_TAGS = 15
 MAX_TAG_LENGTH = 40
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
 AVATAR_TARGET_SIZE = 256  # 256x256
+
+
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+def safe_jsonld(data: dict) -> str:
+    """Safely serialize JSON-LD for embedding in <script> tags.
+
+    Prevents stored XSS via </script> injection in user-controlled fields
+    (display_name, title, description, tags).
+    """
+    s = json.dumps(data, ensure_ascii=False)
+    # Prevent script injection via </script> in user data
+    s = s.replace("</", "<\\/")
+    return s
+
+
+# Regex to strip <script> tags and their contents from user input
+_SCRIPT_TAG_RE = re.compile(r"<\s*/?script[^>]*>", re.IGNORECASE)
+
+
+def _strip_script_tags(value: str) -> str:
+    """Remove <script> tags from user-supplied text fields.
+
+    This is a defence-in-depth measure applied on WRITE (upload, register,
+    profile update). The primary XSS defence is output encoding.
+    """
+    if not value:
+        return value
+    return _SCRIPT_TAG_RE.sub("", value)
 ALLOWED_VIDEO_EXT = {".mp4", ".webm", ".avi", ".mkv", ".mov"}
 ALLOWED_THUMB_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 COMMENT_TYPES = {"comment", "critique"}
@@ -1437,9 +1468,13 @@ def set_security_headers(response):
     is_embed = request.path.startswith("/embed/")
     if not is_embed and not is_api:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # NOTE: 'unsafe-inline' is required for script-src and style-src because
+        # legacy templates use inline <script> blocks (JSON-LD, GA gtag) and
+        # inline <style> blocks throughout.  Migrating to nonce-based CSP
+        # requires refactoring all templates.  XSS in JSON-LD blocks is
+        # mitigated by safe_jsonld() / jsonld_safe which escape </ sequences.
         csp = (
             "default-src 'self'; "
-            # Keep inline scripts for now (legacy templates), but allow GA/gtag when enabled.
             "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://stats.g.doubleclick.net; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
@@ -4535,8 +4570,8 @@ def register_agent():
                 "allowed_track": _normalize_referral_track(ref["allowed_track"], "both"),
             }), 400
 
-    display_name = data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH]
-    bio = data.get("bio", "").strip()[:MAX_BIO_LENGTH]
+    display_name = _strip_script_tags(data.get("display_name", agent_name).strip()[:MAX_DISPLAY_NAME_LENGTH])
+    bio = _strip_script_tags(data.get("bio", "").strip()[:MAX_BIO_LENGTH])
     avatar_url = data.get("avatar_url", "").strip()
     x_handle = data.get("x_handle", "").strip().lstrip("@")[:32]
 
@@ -4758,7 +4793,7 @@ def signup():
         return render_template("login.html", signup=True, form_ts=time.time(), referral_code_value=""), 429
 
     username = request.form.get("username", "").strip().lower()
-    display_name = request.form.get("display_name", "").strip()[:MAX_DISPLAY_NAME_LENGTH]
+    display_name = _strip_script_tags(request.form.get("display_name", "").strip()[:MAX_DISPLAY_NAME_LENGTH])
     password = request.form.get("password", "")
     confirm = request.form.get("confirm_password", "")
     email = request.form.get("email", "").strip().lower()
@@ -6066,14 +6101,14 @@ def upload_video():
     if ext not in ALLOWED_VIDEO_EXT:
         return jsonify({"error": f"Invalid video format. Allowed: {ALLOWED_VIDEO_EXT}"}), 400
 
-    title = request.form.get("title", "").strip()[:MAX_TITLE_LENGTH]
+    title = _strip_script_tags(request.form.get("title", "").strip()[:MAX_TITLE_LENGTH])
     if not title:
-        title = Path(video_file.filename).stem[:MAX_TITLE_LENGTH]
+        title = _strip_script_tags(Path(video_file.filename).stem[:MAX_TITLE_LENGTH])
 
-    description = request.form.get("description", "").strip()[:MAX_DESCRIPTION_LENGTH]
-    scene_description = request.form.get("scene_description", "").strip()[:MAX_DESCRIPTION_LENGTH]
+    description = _strip_script_tags(request.form.get("description", "").strip()[:MAX_DESCRIPTION_LENGTH])
+    scene_description = _strip_script_tags(request.form.get("scene_description", "").strip()[:MAX_DESCRIPTION_LENGTH])
     tags_raw = request.form.get("tags", "")
-    tags = [t.strip()[:MAX_TAG_LENGTH] for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
+    tags = [_strip_script_tags(t.strip()[:MAX_TAG_LENGTH]) for t in tags_raw.split(",") if t.strip()][:MAX_TAGS]
     category = request.form.get("category", "other").strip().lower()
     if category not in CATEGORY_MAP:
         category = "other"
@@ -6085,7 +6120,7 @@ def upload_video():
 
     db = get_db()
     if revision_of:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", revision_of):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", revision_of):
             return jsonify({"error": "Invalid revision_of video id"}), 400
         original = db.execute(
             "SELECT video_id FROM videos WHERE video_id = ?",
@@ -6095,7 +6130,7 @@ def upload_video():
             return jsonify({"error": "revision_of video not found"}), 404
     # Validate response_to video ID (Issue #2282)
     if response_to:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", response_to):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{5,20}", response_to):
             return jsonify({"error": "Invalid response_to video id"}), 400
         original_video = db.execute(
             "SELECT video_id, is_removed FROM videos WHERE video_id = ?",
@@ -7016,7 +7051,7 @@ def web_add_comment(video_id):
         "agent_name": g.user["agent_name"],
         "display_name": g.user["display_name"],
         "is_human": bool(g.user["is_human"]),
-        "avatar_url": g.user.get("avatar_url", ""),
+        "avatar_url": g.user["avatar_url"] if "avatar_url" in g.user.keys() else "",
         "content": content,
         "comment_type": comment_type,
         "video_id": video_id,
@@ -8581,9 +8616,14 @@ def update_profile():
     """Update your agent profile (bio, display_name, avatar_url)."""
     data = request.get_json(silent=True) or {}
     ALLOWED = {"display_name", "bio", "avatar_url", "banner_url", "accent_color", "pinned_video_id"}
+    # Fields that contain user-visible text and need script tag sanitization
+    _TEXT_FIELDS = {"display_name", "bio"}
     updates = {k: v for k, v in data.items() if k in ALLOWED and isinstance(v, str)}
     if not updates:
         return jsonify({"error": "Provide at least one field: display_name, bio, avatar_url"}), 400
+    for field in _TEXT_FIELDS:
+        if field in updates:
+            updates[field] = _strip_script_tags(updates[field])
 
     # Validate lengths
     if "display_name" in updates and len(updates["display_name"]) > 50:
@@ -10814,7 +10854,7 @@ def oembed():
         return jsonify({"error": "Unsupported format. Use json or xml."}), 501
 
     # Extract video_id from URL
-    match = re.search(r"/watch/([A-Za-z0-9_-]{11})", url)
+    match = re.search(r"/watch/([A-Za-z0-9_-]{5,20})", url)
     if not match:
         return jsonify({"error": "Invalid URL"}), 404
 
@@ -10827,6 +10867,8 @@ def oembed():
 
     if not video:
         return jsonify({"error": "Video not found"}), 404
+
+    video = dict(video)  # Convert sqlite3.Row to dict for .get() support
 
     w = request.args.get("maxwidth", video["width"] or 512, type=int)
     h = request.args.get("maxheight", video["height"] or 512, type=int)
@@ -12277,10 +12319,10 @@ if not ADMIN_KEY:
 
 @app.route("/api/admin/visitors")
 def admin_visitors():
-    """View visitor analytics. Requires admin key via header."""
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    """View visitor analytics. Requires admin key via X-Admin-Key header."""
+    err = _require_admin()
+    if err:
+        return err
 
     hours = min(168, max(1, request.args.get("hours", 24, type=int)))
     cutoff = time.time() - hours * 3600
@@ -12347,13 +12389,14 @@ def admin_duplicate_comments():
     Keeps the OLDEST comment (lowest id), removes newer copies.
 
     Query params:
-        key       - admin key (required)
         dry_run   - if "0", actually delete; default is dry-run
         window_h  - only check comments from last N hours (default: all)
+    Headers:
+        X-Admin-Key - admin key (required)
     """
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    err = _require_admin()
+    if err:
+        return err
 
     dry_run = request.args.get("dry_run", "1") != "0"
     window_h = request.args.get("window_h", 0, type=int)
@@ -12424,14 +12467,15 @@ def admin_comment_cleanup():
     """Full comment cleanup: coach/hold duplicates + optionally prune bot spam.
 
     POST JSON:
-        key          - admin key (required)
         remove_dupes - inspect exact duplicates (default true)
         max_similar  - max near-identical comments per agent per video (default 3)
         force_remove - when true, actually delete duplicate/excess comments
+    Headers:
+        X-Admin-Key  - admin key (required)
     """
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        abort(403)
+    err = _require_admin()
+    if err:
+        return err
 
     data = request.get_json(silent=True) or {}
     remove_dupes = data.get("remove_dupes", True)
@@ -12887,8 +12931,16 @@ def push_unsubscribe():
 
 
 def _require_admin():
-    """Check admin key from header or query param. Returns None if OK, or error response."""
-    provided = request.headers.get("X-Admin-Key", "") or request.args.get("key", "")
+    """Check admin key via X-Admin-Key header (preferred).
+
+    Query-param ``?key=`` still accepted for backward compat but logs a
+    deprecation warning -- secrets in URLs leak into logs/history/referers.
+    """
+    provided = request.headers.get("X-Admin-Key", "")
+    if not provided:
+        provided = request.args.get("key", "")
+        if provided:
+            print(f"[BoTTube] DEPRECATION WARNING: admin key via query param on {request.path} -- use X-Admin-Key header")
     if not provided or provided != ADMIN_KEY:
         return jsonify({"error": "Forbidden"}), 403
     return None
@@ -13347,10 +13399,10 @@ def admin_monitoring_api():
 
 @app.route("/monitoring")
 def monitoring_dashboard():
-    """Self-contained monitoring dashboard page. Requires admin key in URL."""
-    provided = request.args.get("key", "")
-    if not provided or provided != ADMIN_KEY:
-        return "Forbidden — append ?key=YOUR_ADMIN_KEY", 403
+    """Self-contained monitoring dashboard page. Requires admin key via X-Admin-Key header."""
+    err = _require_admin()
+    if err:
+        return err
 
     return """<!DOCTYPE html>
 <html lang="en">
@@ -14876,7 +14928,7 @@ def admin_resolve_report(report_id):
 
 def build_breadcrumb_jsonld(items):
     """Build BreadcrumbList JSON-LD from a list of (name, url) tuples."""
-    return Markup(json.dumps({
+    return Markup(safe_jsonld({
         "@context": "https://schema.org",
         "@type": "BreadcrumbList",
         "itemListElement": [
@@ -14891,17 +14943,21 @@ def build_breadcrumb_jsonld(items):
     }))
 
 app.jinja_env.globals["build_breadcrumb_jsonld"] = build_breadcrumb_jsonld
-app.jinja_env.globals["json_dumps"] = lambda x: Markup(json.dumps(x))
+app.jinja_env.globals["json_dumps"] = lambda x: Markup(safe_jsonld(x))
 
 def jsonld_safe(value):
     """Escape a string for safe use inside a JSON-LD string value.
     Handles newlines, tabs, backslashes, quotes — everything json.dumps does,
-    but returns only the inner string (no outer quotes)."""
+    but returns only the inner string (no outer quotes).
+    Also prevents </script> breakout via <\\/ escaping."""
     if value is None:
         return ''
     s = str(value)
     # json.dumps adds outer quotes; strip them to get the escaped interior
-    return Markup(json.dumps(s)[1:-1])
+    inner = json.dumps(s)[1:-1]
+    # Prevent </script> injection when embedded in <script> blocks
+    inner = inner.replace("</", "<\\/")
+    return Markup(inner)
 
 app.jinja_env.filters["jsonld_safe"] = jsonld_safe
 
