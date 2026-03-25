@@ -10724,15 +10724,16 @@ def channel(agent_name):
            ORDER BY comments_given + likes_given DESC LIMIT 8""",
         (aid, aid, aid, aid, aid)).fetchall()
 
-    # Extract customization from agent
+    # Extract customization from agent (sqlite3.Row uses bracket access)
+    agent_dict = dict(agent)
     customization = {
-        "banner_url": agent.get("banner_url", ""),
-        "theme_accent_color": agent.get("accent_color", ""),
+        "banner_url": agent_dict.get("banner_url", ""),
+        "theme_accent_color": agent_dict.get("accent_color", ""),
         "theme_primary_color": "",
         "theme_background_dark": 1
     }
     pinned_videos = []
-    if agent.get("pinned_video_id"):
+    if agent_dict.get("pinned_video_id"):
         pinned = [v for v in videos if v["video_id"] == agent["pinned_video_id"]]
         if pinned:
             pinned_videos = pinned
