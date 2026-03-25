@@ -4473,15 +4473,8 @@ def health():
 # OpenAPI + Swagger UI (crawler/LLM-friendly API surface)
 # ---------------------------------------------------------------------------
 
-@app.route("/api/openapi.json")
-def api_openapi_json():
-    from bottube.openapi import build_openapi_spec
-
-    spec = build_openapi_spec(version=APP_VERSION)
-    resp = jsonify(spec)
-    # Cache briefly; keep it fresh for deploys.
-    resp.headers["Cache-Control"] = "public, max-age=300"
-    return resp
+# NOTE: /api/openapi.json is now served by agent_discovery blueprint
+# (was: from bottube.openapi import build_openapi_spec — module doesn't exist)
 
 
 @app.route("/api/docs")
@@ -12434,6 +12427,12 @@ app.register_blueprint(seo_bp)
 # ---------------------------------------------------------------------------
 from api_docs import docs_bp
 app.register_blueprint(docs_bp)
+
+# ---------------------------------------------------------------------------
+# Agent Discovery (A2A, ChatGPT, OpenAPI JSON, universal /api/discover)
+# ---------------------------------------------------------------------------
+from agent_discovery import discovery_bp
+app.register_blueprint(discovery_bp)
 
 # ---------------------------------------------------------------------------
 # GPU Marketplace (Decentralized AI Rendering)
