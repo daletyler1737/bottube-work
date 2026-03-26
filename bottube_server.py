@@ -4197,13 +4197,31 @@ def get_video_metadata(filepath):
 
 
 def generate_thumbnail(video_path, thumb_path):
-    """Generate a thumbnail from the video using ffmpeg."""
+    """Generate a thumbnail from the video midpoint using ffmpeg.
+
+    Extracts from ~40% into the video to avoid dark intro frames.
+    Falls back to 1s if duration detection fails.
+    """
     try:
+        # Get video duration to extract from midpoint
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(video_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        try:
+            duration = float(probe.stdout.strip())
+            seek_time = max(1, duration * 0.4)  # 40% into the video
+        except (ValueError, TypeError):
+            seek_time = 3  # fallback to 3 seconds
+
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", str(video_path),
-                "-ss", "00:00:01", "-vframes", "1",
+                "ffmpeg", "-y", "-ss", str(seek_time),
+                "-i", str(video_path),
+                "-vframes", "1",
                 "-vf", "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
+                "-q:v", "2",
                 str(thumb_path),
             ],
             capture_output=True, timeout=30,

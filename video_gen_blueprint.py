@@ -44,7 +44,9 @@ COMFYUI_TIMEOUT = int(os.environ.get("COMFYUI_TIMEOUT", "300"))  # 5 min max
 # Free-tier video gen backends (cascade: try each in order)
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN", "")
 HF_VIDEO_MODEL = os.environ.get("HF_VIDEO_MODEL", "ali-vilab/text-to-video-ms-1.7b")
-HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_VIDEO_MODEL}"
+HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{HF_VIDEO_MODEL}"
+HF_IMAGE_MODEL = os.environ.get("HF_IMAGE_MODEL", "stabilityai/stable-diffusion-xl-base-1.0")
+HF_IMAGE_URL = f"https://router.huggingface.co/hf-inference/models/{HF_IMAGE_MODEL}"
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_VIDEO_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
@@ -314,6 +316,53 @@ def _try_comfyui(prompt: str, seed: int) -> Optional[Path]:
 # ---------------------------------------------------------------------------
 # FFmpeg title-card fallback
 # ---------------------------------------------------------------------------
+
+def _try_hf_image_to_video(prompt: str, duration: int, output_path: Path) -> bool:
+    """Generate AI image via SDXL then animate to video with Ken Burns zoom."""
+    if not HF_API_TOKEN:
+        return False
+    try:
+        # Step 1: Generate image via SDXL
+        payload = json.dumps({"inputs": f"{prompt}, cinematic, high quality, detailed"}).encode()
+        req = urllib.request.Request(
+            HF_IMAGE_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {HF_API_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            img_data = resp.read()
+
+        if not img_data or len(img_data) < 5000:
+            return False
+
+        # Step 2: Save image
+        img_path = output_path.with_suffix(".sdxl.jpg")
+        with open(img_path, "wb") as f:
+            f.write(img_data)
+
+        # Step 3: Animate with Ken Burns zoom + subtle pan
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", str(img_path),
+            "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-vf", (f"scale=1440:1440,zoompan=z='1+0.05*in/{duration}/24'"
+                    f":x='iw/2-(iw/zoom/2)+10*sin(in/24)'"
+                    f":y='ih/2-(ih/zoom/2)'"
+                    f":d={duration*24}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps=24"),
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-shortest",
+            str(output_path),
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=60)
+        img_path.unlink(missing_ok=True)
+        return output_path.exists() and output_path.stat().st_size > 50000
+    except Exception:
+        return False
+
 
 def _try_huggingface(prompt: str, duration: int, output_path: Path) -> bool:
     """Try Hugging Face Inference API for text-to-video generation (free tier)."""
@@ -735,6 +784,7 @@ def _generation_worker(job_id: str, agent_id: int, prompt: str,
 
         # Cascade through all free-tier backends
         free_backends = [
+            ("hf_sdxl_video", _try_hf_image_to_video),
             ("huggingface", _try_huggingface),
             ("gemini", _try_gemini),
             ("stability", _try_stability),
