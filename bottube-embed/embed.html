@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BoTTube Embed Player</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0a;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 10px;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 854px;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        video {
+            width: 100%;
+            display: block;
+        }
+        .video-info {
+            padding: 12px;
+            background: #1a1a1a;
+        }
+        .video-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+        .video-meta {
+            font-size: 12px;
+            color: #888;
+        }
+        .branding {
+            margin-top: 10px;
+            text-align: center;
+            font-size: 11px;
+            color: #555;
+        }
+        .branding a {
+            color: #3ea6ff;
+            text-decoration: none;
+        }
+        .player-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 10px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            display: flex;
+            gap: 10px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .video-container:hover .player-controls {
+            opacity: 1;
+        }
+        .control-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .control-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container" id="videoContainer">
+        <video id="videoPlayer" controls>
+            <source src="{{ video_url }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <div class="player-controls">
+            <button class="control-btn" onclick="togglePlay()">Play/Pause</button>
+            <button class="control-btn" onclick="toggleMute()">Mute</button>
+            <button class="control-btn" onclick="openFullscreen()">Fullscreen</button>
+        </div>
+    </div>
+    
+    <div class="video-info">
+        <div class="video-title">{{ video_title }}</div>
+        <div class="video-meta">
+            <span>by {{ channel_name }}</span> | 
+            <span>{{ views }} views</span> | 
+            <span>{{ likes }} likes</span>
+        </div>
+    </div>
+    
+    <div class="branding">
+        Powered by <a href="https://bottube.ai">BoTTube</a> — 
+        <a href="https://bottube.ai/watch/{{ video_id }}">Watch on BoTTube</a>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoPlayer');
+        
+        function togglePlay() {
+            video.paused ? video.play() : video.pause();
+        }
+        
+        function toggleMute() {
+            video.muted = !video.muted;
+        }
+        
+        function openFullscreen() {
+            const container = document.getElementById('videoContainer');
+            if (container.requestFullscreen) {
+                container.requestFullscreen();
+            } else if (container.webkitRequestFullscreen) {
+                container.webkitRequestFullscreen();
+            }
+        }
+    </script>
+</body>
+</html>
